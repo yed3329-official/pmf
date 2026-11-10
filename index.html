@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MPS → PMF</title>
+<style>
+
+
+
+:root{background:linear-gradient(to bottom, #000000, #800000)}
+{:root{--b:#121214;--f:#eee;--m:#9a9aa2;--c:#1e1e22;--a:#60a5fa}}
+body{margin:0;padding:16px;background:var(--b);color:#fff;font:16px/1.45 system-ui,sans-serif;max-width:560px;margin:auto}
+h1{font-size:1.3rem;margin:.2em 0}p,small{color:#ffffff}
+.card{background:linear-gradient(to bottom, #800000, #000000);border-radius:12px;padding:14px;margin:12px 0}
+label{display:block;margin:8px 0 4px;font-size:.9rem}
+input{width:100%;box-sizing:border-box;padding:10px;font-size:1rem;border-radius:8px;border:1px solid var(--m);background:linear-gradient(to bottom, #000000, #800000);color:#ffffff}
+.row{display:flex;gap:10px}.row>div{flex:1}
+button{width:100%;padding:14px;font-size:1.05rem;border:0;border-radius:10px;background:grey;color:#ffffff;margin-top:12px}
+button:disabled{opacity:.4}#log{color:#ffffff;white-space:pre-wrap;font:13px/1.4 monospace}
+</style></head><body>
+<h1>MPS → PMF for PSP</h1>
+<p>Adds the 2048-byte PSMF header to a PSP-ready MPEG program stream. It does not re-encode anything, so it runs fast and offline.</p>
+<div class="card">
+<label for="f">MPS file</label>
+<input id="f" type="file" accept=".mps,.mpg,.mpeg,.ps,video/mpeg,*/*">
+<label for="n">Output name</label>
+<input id="n" value="movie.pmf">
+<div class="row"><div><label for="w">Width</label><input id="w" type="number" value="480" step="16" min="16" max="480"></div>
+<div><label for="h">Height</label><input id="h" type="number" value="272" step="16" min="16" max="272"></div></div>
+<button id="go" disabled>Convert &amp; download</button>
+</div>
+<div class="card"><div id="log">Pick an .mps file.</div></div>
+<small>The MPS must already be PSP-style: H.264 video, ATRAC3+ audio in private stream 1, starting with a pack header. Width and height should match the video.</small>
+<script>
+// Header template taken from a working PMF (first 0xA2 bytes; the rest is zero padding)
+const T="50534d46303031320000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004e000000015f90000000b6ec20000061a800015f90020100000034000000015f90000000b6ec200001000000220002e00021ef00000000000000001e110000bd002004000000000000000000000202";
+const $=id=>document.getElementById(id),log=t=>$('log').textContent=t;
+let file;
+$('f').onchange=e=>{file=e.target.files[0];if(!file)return;
+ $('n').value=file.name.replace(/\.[^.]+$/,'')+'.pmf';$('go').disabled=false;log(file.name+'\n'+(file.size/1048576).toFixed(1)+' MB')};
+function pts(u,p){ // 33-bit PTS from a PES header at p, or -1 if not valid
+ if(p+14>u.length||(u[p+7]&0x80)===0)return -1;
+ const a=u[p+9],b=u[p+10],c=u[p+11],d=u[p+12],e=u[p+13];
+ if((a&0xE1)!==0x21||!(c&1)||!(e&1))return -1;
+ return ((a>>1)&7)*1073741824+((b<<22)|((c>>1)<<15)|(d<<7)|(e>>1));
+}
+function scan(u){const r=[];for(let i=0;i+14<u.length;i++){
+ if(u[i]===0&&u[i+1]===0&&u[i+2]===1&&u[i+3]===0xE0){const t=pts(u,i);if(t>=0)r.push(t)}}return r}
+$('go').onclick=async()=>{try{
+ const N=4*1048576,head=new Uint8Array(await file.slice(0,N).arrayBuffer());
+ if(head[0]||head[1]||head[2]!==1||head[3]!==0xBA)throw Error('File does not start with an MPEG pack header (00 00 01 BA).');
+ const tail=new Uint8Array(await file.slice(Math.max(0,file.size-N)).arrayBuffer());
+ const h=scan(head),t=scan(tail);
+ if(!h.length||!t.length)throw Error('No video timestamps found; this does not look like a PSP MPS.');
+ const first=Math.min(...h),last=Math.max(...t)+3003;
+ const hdr=new Uint8Array(2048),dv=new DataView(hdr.buffer);
+ for(let i=0;i<T.length/2;i++)hdr[i]=parseInt(T.substr(i*2,2),16);
+ dv.setUint32(0x0C,file.size);
+ for(const o of[0x56,0x64,0x70])dv.setUint32(o,first);
+ for(const o of[0x5C,0x76])dv.setUint32(o,last);
+ hdr[0x8E]=Math.round($('w').value/16);hdr[0x8F]=Math.round($('h').value/16);
+ const url=URL.createObjectURL(new Blob([hdr,file],{type:'application/octet-stream'}));
+ const a=document.createElement('a');a.href=url;a.download=$('n').value||'movie.pmf';document.body.appendChild(a);a.click();a.remove();
+ log('Done.\nDuration ≈ '+((last-first)/90000).toFixed(1)+' s\nPMF size '+((file.size+2048)/1048576).toFixed(1)+' MB')
+}catch(e){log('Error: '+e.message)}};
+
+
+</script></body></html>
