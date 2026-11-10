@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AVI + AT3 → MPS</title>
+<style>
+:root{color-scheme:light dark;--b:#fff;--f:#1a1a1a;--m:#666;--c:#f2f2f5;--a:#2563eb}
+@media(prefers-color-scheme:dark){:root{--b:#121214;--f:#eee;--m:#9a9aa2;--c:#1e1e22;--a:#60a5fa}}
+body{margin:0;padding:16px;  background: linear-gradient(135deg, #800000,#000000, #326CB5);color:var(--f);font:16px/1.45 system-ui,sans-serif;max-width:560px;margin:auto}
+h1{font-size:1.3rem;margin:.2em 0}p,small{color:var(--m)}
+.card{background:linear-gradient(135deg,#800000, #000000,#000000, #326CB5);border-radius:12px;padding:14px;margin:12px 0}
+label{display:block;margin:8px 0 4px;font-size:.9rem}
+input{width:100%;box-sizing:border-box;padding:10px;font-size:1rem;border-radius:8px;border:1px solid var(--m);background:linear-gradient(135deg, #800000,#000000,#000000,#000000, #326CB5);color:var(--f)}
+button{width:100%;padding:14px;font-size:1.05rem;border:0;border-radius:10px;background:linear-gradient(135deg, #000000,#326CB5, #326CB5);color:#fff;margin-top:12px}
+button:disabled{opacity:.4}#log{background:white-space:pre-wrap;font:13px/1.4 monospace: background:}
+</style></head><body>
+<h1>AVI + AT3 → MPS (PSP)</h1>
+<p>Multiplexes an H.264 AVI and an ATRAC3+ audio file into a PSP-style MPEG program stream. Nothing is re-encoded.</p>
+<div class="card">
+<label for="v">Video File <br><b> Must be:</b><br>(.avi, Video Codec: H.264 Fps:29.97)<br><b>[Use Audio Video Factory app to convert a video to AVi]</b></label><input id="v" type="file" accept=".avi,video/*,*/*">
+<label for="a">Audio File <br><b> Must be:</b><br>(.at3 / ATRAC3+ .wav)<br><b><i>[Use at9 & at3 converter to convert at3 file]</i></b></label><input id="a" type="file" accept=".at3,.wav,audio/*,*/*">
+<label for="n">Output name<br><b><i> [This output file can be used for mps to pmf converter]</i><b></label><input id="n" value="movie.mps">
+<button id="go" disabled>Multiplex &amp; download</button>
+</div>
+<div class="card"><div id="log">Pick both files.</div></div>
+<small>Audio must already be ATRAC3+ (44.1 kHz). Plain PCM WAV cannot be used: encode it to .at3 first (for example with Sony's at3tool).</small>
+<script>
+const $=id=>document.getElementById(id),log=t=>$('log').textContent=t;
+let V,A;const chk=()=>$('go').disabled=!(V&&A);
+$('v').onchange=e=>{V=e.target.files[0];if(V)$('n').value=V.name.replace(/\.[^.]+$/,'')+'.mps';chk()};
+$('a').onchange=e=>{A=e.target.files[0];chk()};
+const u32=(d,o)=>d.getUint32(o,true),fcc=(d,o)=>String.fromCharCode(d.getUint8(o),d.getUint8(o+1),d.getUint8(o+2),d.getUint8(o+3));
+
+// ---- AVI demux: returns {aus:[Uint8Array], dur:ticks per frame, w, h}
+function parseAvi(buf){
+ const d=new DataView(buf),u=new Uint8Array(buf);
+ if(fcc(d,0)!=='RIFF'||fcc(d,8)!=='AVI ')throw Error('Not an AVI file.');
+ const aus=[];let vid=-1,idx=-1,rate=30000,scale=1001,w=0,h=0;
+ (function walk(p,end){while(p+8<=end){
+  const id=fcc(d,p),sz=u32(d,p+4),b=p+8;
+  if(id==='LIST'||id==='RIFF'){const t=fcc(d,b);walk(b+4,Math.min(end,b+sz));}
+  else if(id==='strh'){idx++;if(fcc(d,b)==='vids'&&vid<0){vid=idx;scale=u32(d,b+20);rate=u32(d,b+24);}}
+  else if(id==='strf'&&idx===vid&&w===0){w=u32(d,b+4);h=u32(d,b+8);}
+  else if(/^\d\ddc$|^\d\ddb$/.test(id)&&+id.slice(0,2)===vid&&sz>0)aus.push(u.subarray(b,b+sz));
+  p=b+sz+(sz&1);}})(12,buf.byteLength);
+ if(!aus.length)throw Error('No video frames found in the AVI.');
+ return{aus,dur:90000*scale/rate,w,h};
+}
+// ---- AT3 / WAV demux: returns {frames:[Uint8Array], ba, ch, sr}
+function parseAt3(buf){
+ const d=new DataView(buf);
+ if(fcc(d,0)!=='RIFF'||fcc(d,8)!=='WAVE')throw Error('Audio is not a RIFF WAVE/AT3 file.');
+ let p=12,fmt,data;
+ while(p+8<=buf.byteLength){const id=fcc(d,p),sz=u32(d,p+4);
+  if(id==='fmt ')fmt=p+8;if(id==='data'){data=[p+8,Math.min(sz,buf.byteLength-p-8)];break}
+  p+=8+sz+(sz&1);}
+ if(!fmt||!data)throw Error('Audio file has no fmt/data chunk.');
+ const tag=d.getUint16(fmt,true),ch=d.getUint16(fmt+2,true),sr=u32(d,fmt+4),ba=d.getUint16(fmt+12,true);
+ if(tag===1)throw Error('This is PCM WAV. The PSP needs ATRAC3+ audio: encode it to .at3 first.');
+ if(sr!==44100)throw Error('ATRAC3+ must be 44100 Hz (found '+sr+').');
+ const frames=[];for(let o=data[0];o+ba<=data[0]+data[1];o+=ba)frames.push(new Uint8Array(buf,o,ba));
+ return{frames,ba,ch,sr};
+}
+
+// ---- MPEG-PS muxer in PSP layout (2048-byte packs)
+const SYS=[0,0,1,0xBB,0,12,0x80,0xC3,0x51,0x80,0xF0,0x7F,0xB9,0xE0,0xFB,0xBD,0xE0,8];
+const ts=(v,m)=>[m|((Math.floor(v/1073741824)&7)<<1)|1,(v>>>22)&255,((v>>>14)&0xFE)|1,(v>>>7)&255,((v<<1)&0xFE)|1];
+const AUD=[0,0,0,1,9];
+function packHdr(s,k,step27){ // writes pack header for sector k
+ const t=Math.round(15160*300+288+k*step27),base=Math.floor(t/300),ext=t%300,hi=Math.floor(base/1073741824)&7,lo=base%1073741824;
+ s.set([0,0,1,0xBA,0x40|(hi<<3)|4|((lo>>>28)&3),(lo>>>20)&255,(((lo>>>15)&31)<<3)|4|((lo>>>13)&3),(lo>>>5)&255,((lo&31)<<3)|4|((ext>>7)&3),((ext&127)<<1)|1,1,0x86,0xA3,0xF8]);
+}
+function writePes(s,p,sid,flags,hdr,pay){
+ const len=3+hdr.length+pay.length;
+ s.set([0,0,1,sid,len>>8,len&255,0x81,flags,hdr.length,...hdr],p);p+=9+hdr.length;s.set(pay,p);return p+pay.length;
+}
+function padSector(s,p){const f=2048-p;if(f>0){s.set([0,0,1,0xBE,(f-6)>>8,(f-6)&255],p);s.fill(0xFF,p+6);}}
+function mux(aus,dur,frames,ba,ch){
+ // video elementary stream: Annex B, every AU starts with an AUD
+ const parts=[],starts=[];let tot=0;
+ aus.forEach((a,i)=>{
+  const sc=a[0]===0&&a[1]===0&&(a[2]===1||(a[2]===0&&a[3]===1));
+  if(!sc)throw Error('Video frame '+i+' is not Annex B H.264 (no start code). Re-wrap the stream in Annex B.');
+  let idr=false,hasAud=false;
+  for(let j=0;j+4<a.length&&j<65536;j++)if(a[j]===0&&a[j+1]===0&&a[j+2]===1){const t=a[j+3]&31;if(t===5)idr=true;if(t===9&&j<5)hasAud=true;}
+  if(!hasAud){parts.push(Uint8Array.from([...AUD,idr?0x10:0x30]));tot+=6;}
+  starts.push(tot);parts.push(a);tot+=a.length;
+ });
+ const vb=new Uint8Array(tot);let o=0;for(const x of parts){vb.set(x,o);o+=x.length;}
+ // audio elementary stream: 8-byte PSP header + frame body
+ const fs=ba+8,par=(1<<13)|(ch<<10)|(ba/8-1),ab=new Uint8Array(frames.length*fs);
+ frames.forEach((f,i)=>{ab.set([0x0F,0xD0,par>>8,par&255,0,0,0,0],i*fs);ab.set(f,i*fs+8);});
+ const P0=90000,d1=Math.round(dur),aP0=P0-4931,afd=2048*90000/44100;
+ const vpts=i=>P0+Math.round(i*dur);
+ // first-GOP size table for the private stream 2 packet
+ let g=1;while(g<starts.length&&g<59&&vb[starts[g]+5]!==0x10)g++;
+ const bf=new Uint8Array(254);bf.set([1,0xE0]);bf[15]=0xEE;bf[16]=0;bf[17]=g;
+ for(let i=0;i<g;i++){const sz=Math.min(65535,(i+1<starts.length?starts[i+1]:vb.length)-starts[i]);bf[18+i*4]=0x04;bf[19+i*4]=i===g-1?0:0x80;bf[20+i*4]=sz>>8;bf[21+i*4]=sz&255;}
+ const out=[];let vp=0,ap=0,ai=0,first=true;
+ while(vp<vb.length||ap<ab.length){
+  const s=new Uint8Array(2048);let p=14;
+  while(ai<starts.length&&starts[ai]<vp)ai++;
+  const vD=vp<vb.length?vpts(Math.min(ai,starts.length-1))-d1:Infinity;
+  const aN=Math.ceil(ap/fs),aT=ap<ab.length?aP0+Math.round(aN*afd):Infinity;
+  const useA=!first&&ap<ab.length&&(vp>=vb.length||aT<=vD+9000);
+  if(useA){
+   const hl=ap===0?8:5,cap=2048-14-9-hl-4;let n=Math.min(cap,ab.length-ap);
+   let fr=2048-14-9-hl-4-n;if(fr>0&&fr<6)n-=6-fr;
+   const ptr=(fs-ap%fs)%fs,hdr=ap===0?[...ts(aP0,0x20),0x1E,0x60,0x08]:ts(aT,0x20);
+   const pay=new Uint8Array(4+n);pay.set([0,0,ptr>>8,ptr&255]);pay.set(ab.subarray(ap,ap+n),4);
+   p=writePes(s,p,0xBD,ap===0?0x81:0x80,hdr,pay);ap+=n;padSector(s,p);
+  }else{
+   let F=2048-14;if(first){s.set(SYS,p);p+=18;s.set([0,0,1,0xBF,0,254],p);s.set(bf,p+6);p+=260;F=2048-p;}
+   const cap10=F-9-10,hasTs=ai<starts.length&&starts[ai]<vp+cap10;
+   const hl=first?13:hasTs?10:0,cap=F-9-hl;let n=Math.min(cap,vb.length-vp);
+   const fr=cap-n;if(fr>0&&fr<6)n-=6-fr;
+   let hdr=[],fl=0;
+   if(hasTs||first){const i=ai;hdr=[...ts(vpts(i),0x30),...ts(vpts(i)-d1,0x10)];fl=0xC0;if(first){hdr.push(0x1E,0x60,0xFB);fl=0xC1;}}
+   p=writePes(s,p,0xE0,fl,hdr,vb.subarray(vp,vp+n));vp+=n;padSector(s,p);first=false;
+  }
+  out.push(s);
+ }
+ const step=((vpts(aus.length-1)-P0)*300)/out.length;
+ out.forEach((s,k)=>packHdr(s,k,step));
+ return out;
+}
+
+$('go').onclick=async()=>{try{
+ $('go').disabled=true;log('Reading files…');
+ const v=parseAvi(await V.arrayBuffer()),a=parseAt3(await A.arrayBuffer());
+ log('Video: '+v.aus.length+' frames, '+v.w+'×'+v.h+'\nAudio: '+a.frames.length+' ATRAC3+ frames\nMultiplexing…');
+ await new Promise(r=>setTimeout(r,30));
+ const sec=mux(v.aus,v.dur,a.frames,a.ba,a.ch);
+ const url=URL.createObjectURL(new Blob(sec,{type:'application/octet-stream'}));
+ const l=document.createElement('a');l.href=url;l.download=$('n').value||'movie.mps';document.body.appendChild(l);l.click();l.remove();
+ log('Done.\nVideo: '+v.aus.length+' frames ('+(v.aus.length*v.dur/90000).toFixed(1)+' s)\nOutput: '+(sec.length*2048/1048576).toFixed(1)+' MB, '+sec.length+' packs'
+  +(v.w>480||v.h>272?'\nWarning: video is larger than 480×272; the PSP will not play it.':''));
+}catch(e){log('Error: '+e.message)}$('go').disabled=false};
+</script></body></html>
