@@ -15,7 +15,29 @@ label{display:block;margin:8px 0 4px;font-size:.9rem}
 input{width:100%;box-sizing:border-box;padding:10px;font-size:1rem;border-radius:8px;border:1px solid var(--m);background:linear-gradient(to bottom, #000000, #800000);color:#ffffff}
 .row{display:flex;gap:10px}.row>div{flex:1}
 button{width:100%;padding:14px;font-size:1.05rem;border:0;border-radius:10px;background:grey;color:#ffffff;margin-top:12px}
-button:disabled{opacity:.4}#log{color:#ffffff;white-space:pre-wrap;font:13px/1.4 monospace}
+button:disabled{opacity:.4}#log{color:#ffffff;white-space:pre-wrap;font:13px/1.4 monospace
+}
+      .video-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 20%;
+    object-fit: cover;
+    object-position: center;
+    z-index: -1;
+  }
+  .content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    color: #ffffff;
+    text-align: center;
+    background: rgba(800,0,0.); /* dark overlay so text is readable */
+  }
+  
 </style></head><body>
 <h1>MPS → PMF for PSP</h1>
 <p>Adds the 2048-byte PSMF header to a PSP-ready MPEG program stream. It does not re-encode anything, so it runs fast and offline.</p>
@@ -65,3 +87,12 @@ $('go').onclick=async()=>{try{
 
 
 </script></body></html>
+
+
+<div>
+              <video class="video-bg" autoplay muted loop playsinline>
+    <source src="015.dat" type="video/mp4">
+  </video>
+            </div>
+
+      
