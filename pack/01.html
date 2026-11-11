@@ -35,7 +35,8 @@ button:disabled{opacity:.4}#log{background:white-space:pre-wrap;font:13px/1.4 mo
     background: rgba(800,0,0.); /* dark overlay so text is readable */
   }
   
-</style></head><body>
+</style></head>
+ <body>
 <h1>AVI + AT3 → MPS (PSP)</h1>
 <p>Multiplexes an H.264 AVI and an ATRAC3+ audio file into a PSP-style MPEG program stream. Nothing is re-encoded.</p>
 <div class="card">
@@ -158,12 +159,14 @@ $('go').onclick=async()=>{try{
  log('Done.\nVideo: '+v.aus.length+' frames ('+(v.aus.length*v.dur/90000).toFixed(1)+' s)\nOutput: '+(sec.length*2048/1048576).toFixed(1)+' MB, '+sec.length+' packs'
   +(v.w>480||v.h>272?'\nWarning: video is larger than 480×272; the PSP will not play it.':''));
 }catch(e){log('Error: '+e.message)}$('go').disabled=false};
-</script></body></html>
+</script>
 
  <div>
               <video class="video-bg" autoplay muted loop playsinline>
     <source src="015.dat" type="video/mp4">
   </video>
             </div>
+ </body>
+</html>
 
       
