@@ -12,6 +12,29 @@ label{display:block;margin:8px 0 4px;font-size:.9rem}
 input{width:100%;box-sizing:border-box;padding:10px;font-size:1rem;border-radius:8px;border:1px solid var(--m);background:linear-gradient(135deg, #800000,#000000,#000000,#000000, #326CB5);color:var(--f)}
 button{width:100%;padding:14px;font-size:1.05rem;border:0;border-radius:10px;background:linear-gradient(135deg, #000000,#326CB5, #326CB5);color:#fff;margin-top:12px}
 button:disabled{opacity:.4}#log{background:white-space:pre-wrap;font:13px/1.4 monospace: background:}
+
+ }
+      .video-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 20%;
+    object-fit: cover;
+    object-position: center;
+    z-index: -1;
+  }
+  .content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    color: #ffffff;
+    text-align: center;
+    background: rgba(800,0,0.); /* dark overlay so text is readable */
+  }
+  
 </style></head><body>
 <h1>AVI + AT3 → MPS (PSP)</h1>
 <p>Multiplexes an H.264 AVI and an ATRAC3+ audio file into a PSP-style MPEG program stream. Nothing is re-encoded.</p>
@@ -136,3 +159,11 @@ $('go').onclick=async()=>{try{
   +(v.w>480||v.h>272?'\nWarning: video is larger than 480×272; the PSP will not play it.':''));
 }catch(e){log('Error: '+e.message)}$('go').disabled=false};
 </script></body></html>
+
+ <div>
+              <video class="video-bg" autoplay muted loop playsinline>
+    <source src="015.dat" type="video/mp4">
+  </video>
+            </div>
+
+      
